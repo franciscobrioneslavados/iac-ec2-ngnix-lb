@@ -4,6 +4,8 @@
 *.tfstate.*
 *.tfplan
 crash.log
+tfplan
+tfplan.out
 
 # Sensitive keys and local files
 *.pem
