@@ -1,0 +1,33 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Sensitive keys and local files
+*.pem
+*.key
+*.pub
+*.crt
+*.p12
+private.pem
+development-nginx-reverse-proxy-key.pem
+
+# Local editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+/var/log/*.log
+
+# Generated user data / deployment artifacts
+/nginx-deployment-complete.log
+/var/log/nginx-setup.log
+/var/log/nginx-lb-install.log
+
+# Ignore modules cache and lock files used by CI or local tooling
+.terraform.lock.hcl
