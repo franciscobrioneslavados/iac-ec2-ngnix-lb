@@ -1,7 +1,22 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+}
+
+variable "vpc_id" {
+  description = "ID of the VPC where resources will be deployed"
+}
+
+variable "CIDR_block" {
+  description = "CIDR block for the VPC"
+}
+
+variable "public_subnet_ids" {
+  description = "List of public subnet IDs for resource deployment"
+}
+
+variable "private_subnet_ids" {
+  description = "List of private subnet IDs for resource deployment"
 }
 
 variable "project_name" {
@@ -16,12 +31,6 @@ variable "environment" {
   default     = "development"
 }
 
-variable "namespace_name" {
-  description = "Nombre del namespace para Service Discovery"
-  type        = string
-  default     = "internal.ecs"
-}
-
 variable "managed_by" {
   description = "value for the ManagedBy tag"
   type        = string
@@ -31,21 +40,20 @@ variable "managed_by" {
 variable "owner_name" {
   description = "value for the Owner tag"
   type        = string
-  default     = "Francisco Briones"
+}
+
+variable "namespace_name" {
+  description = "Nombre del namespace para Service Discovery"
+  type        = string
+  default     = "internal.ecs"
 }
 
 variable "nginx_instance_type" {
   description = "Tipo de instancia para NGINX"
   type        = string
-  default     = "t3.micro"
+  default     = "t2.micro"
 }
 
 variable "ssh_allowed_cidr" {
-  default = ["201.223.100.240/32"]
-}
 
-variable "ssh_public_key_path" {
-  description = "Ruta a la clave pública SSH"
-  type        = string
-  default     = "~/.ssh/id_rsa.pub"
 }

@@ -15,7 +15,7 @@ Despliegue rápido
 1. Inicializar Terraform:
    - terraform init
 2. Previsualizar:
-   - terraform plan -out=tfplan
+   - terraform plan -out=tfplan --var-file="file.tfvars"
 3. Aplicar:
    - terraform apply tfplan
 

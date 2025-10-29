@@ -33,3 +33,5 @@ Thumbs.db
 
 # Ignore modules cache and lock files used by CI or local tooling
 .terraform.lock.hcl
+
+*.tfvars
