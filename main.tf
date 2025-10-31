@@ -1,3 +1,7 @@
+data "aws_vpc" "selected" {
+  id = var.vpc_id
+}
+
 locals {
   global_tags = {
     "Environment" = var.environment
@@ -6,6 +10,58 @@ locals {
     "ProjectName" = var.project_name
   }
 
+  sd_services = {
+    # Backend APIs (privados)
+    nestjs-backend = {
+      name                           = "nestjs"
+      dns_type                       = "A"
+      ttl                            = 60
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 2
+    },
+
+    python-analytics = {
+      name                           = "python"
+      dns_type                       = "A"
+      ttl                            = 60
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 2
+    },
+
+    mariadb = {
+      name                           = "mariadb"
+      dns_type                       = "A"
+      ttl                            = 60
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 1
+    },
+
+    # Frontends (accesibles via ALB, pero discovery interno)
+    wordpress = {
+      name                           = "wordpress"
+      dns_type                       = "A"
+      ttl                            = 10
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 2
+    },
+
+    angular-frontend = {
+      name                           = "angular"
+      dns_type                       = "A"
+      ttl                            = 60
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 2
+    },
+
+    react-frontend = {
+      name                           = "react"
+      dns_type                       = "A"
+      ttl                            = 60
+      routing_policy                 = "MULTIVALUE"
+      health_check_failure_threshold = 2
+    }
+  }
+  vpc_dns_resolver = cidrhost(data.aws_vpc.selected.cidr_block, 2)
 }
 
 # Data sources
@@ -27,62 +83,14 @@ data "aws_ami" "amazon_linux_2" {
     values = ["hvm"]
   }
 }
+
 module "services_discovery" {
   source = "./modules/services_discovery/private"
 
   vpc_id         = var.vpc_id
-  namespace_name = "internal.ecs"
-  services = {
-    # Backend APIs (privados)
-    nestjs-backend = {
-      name                           = "nestjs"
-      dns_type                       = "A"
-      ttl                            = 60
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 2
-    },
+  services       = local.sd_services
+  namespace_name = var.namespace_name
 
-    python-analytics = {
-      name                           = "python"
-      dns_type                       = "A"
-      ttl                            = 60
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 2
-    },
-
-    mariadb = {
-      name                           = "mariadb"
-      dns_type                       = "A" # Para servicios con puerto específico
-      ttl                            = 300
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 1
-    },
-
-    # Frontends (accesibles via ALB, pero discovery interno)
-    wordpress = {
-      name                           = "wordpress"
-      dns_type                       = "A"
-      ttl                            = 60
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 2
-    },
-
-    angular-frontend = {
-      name                           = "angular"
-      dns_type                       = "A"
-      ttl                            = 60
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 2
-    },
-
-    react-frontend = {
-      name                           = "react"
-      dns_type                       = "A"
-      ttl                            = 60
-      routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 2
-    }
-  }
   global_tags = local.global_tags
 }
 
@@ -161,10 +169,9 @@ resource "local_file" "private_key" {
   file_permission = "0400"
 }
 
-
 # EC2 Instance para NGINX
 resource "aws_instance" "nginx_proxy" {
-  ami           = "ami-08813f55dd23cc99c" # data.aws_ami.amazon_linux_2.id
+  ami           = data.aws_ami.amazon_linux_2.id
   instance_type = var.nginx_instance_type
   subnet_id     = var.public_subnet_ids[0]
 
@@ -172,11 +179,103 @@ resource "aws_instance" "nginx_proxy" {
   key_name               = aws_key_pair.key_pair.key_name
   iam_instance_profile   = aws_iam_instance_profile.nginx_lb_profile.name
 
+  # user-data para instalar y configurar NGINX pasandole el namespace de Service Discovery y el listado de servicios para usarlo como export de variables
+  user_data = (<<-EOF
+              #!/bin/bash
+              set -e
+
+              yum update -y
+              amazon-linux-extras install nginx1 -y
+              systemctl start nginx
+              systemctl enable nginx
+
+              # Escribir index.html dinámico con datos de la instancia (hostname, IPs, instance-id)
+              # Usamos IMDSv2 y $${...} para que Terraform no interpole las variables de shell
+              TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds:21600" || true)
+              INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $${TOKEN}" http://169.254.169.254/latest/meta-data/instance-id || echo "n/a")
+              LOCAL_IPV4=$(curl -s -H "X-aws-ec2-metadata-token: $${TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 || hostname -I | awk '{print $1}')
+              PUBLIC_IPV4=$(curl -s -H "X-aws-ec2-metadata-token: $${TOKEN}" http://169.254.169.254/latest/meta-data/public-ipv4 || echo "n/a")
+              HOSTNAME=$(hostname -f || hostname)
+
+              # Configurar NGINX con los servicios de Service Discovery
+              NAMESPACE="${var.namespace_name}"
+              SERVICES=$(cat <<EOL
+              ${join("\n", [for k, v in local.sd_services : lookup(v, "name", k)])}
+              EOL
+              )
+
+              # Generar index.html dinámico incluyendo las rutas detectadas
+              cat > /usr/share/nginx/html/index.html <<HTML_EOF
+              <!doctype html>
+              <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>AWS EC2 Instance</title>
+                  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem}</style>
+                </head>
+                <body>
+                  <h1>AWS EC2 Instance</h1>
+                  <p>Información de la máquina que sirve este proxy NGINX:</p>
+                  <ul>
+                    <li><strong>Custom Name:</strong> AWS EC2 Instance</li>
+                    <li><strong>Hostname:</strong> $${HOSTNAME}</li>
+                    <li><strong>Instance ID:</strong> $${INSTANCE_ID}</li>
+                    <li><strong>Private IP:</strong> $${LOCAL_IPV4}</li>
+                    <li><strong>Public IP:</strong> $${PUBLIC_IPV4}</li>
+                  </ul>
+                  <p>Rutas:</p>
+                  <ul>
+              HTML_EOF
+
+              for SVC in $SERVICES; do
+                # Añade un item por servicio con link local al proxy y la FQDN destino
+                echo "    <li><a href=\"/$${SVC}/\">$${SVC}</a> — http://$${SVC}.$${NAMESPACE}</li>" >> /usr/share/nginx/html/index.html
+              done
+
+              cat >> /usr/share/nginx/html/index.html <<HTML_EOF
+                  </ul>
+                </body>
+              </html>
+              HTML_EOF
+
+              # Configurar NGINX con los servicios de Service Discovery
+              NGINX_CONF="/etc/nginx/conf.d/reverse-proxy.conf"
+              echo "server {" > $NGINX_CONF
+              echo "    listen 80;" >> $NGINX_CONF
+              echo "    root /usr/share/nginx/html;" >> $NGINX_CONF
+
+              # Usar el resolver calculado desde Terraform
+              echo "    resolver ${local.vpc_dns_resolver} valid=30s;" >> $NGINX_CONF
+
+              for SERVICE in $SERVICES; do
+                  SERVICE_FQDN="$${SERVICE}.$${NAMESPACE}"
+                  echo "    location /$${SERVICE}/ {" >> $NGINX_CONF
+                  # Usar set + proxy_pass con variable para que nginx resuelva en tiempo de petición
+                  echo "        set \$backend \"$${SERVICE_FQDN}\";" >> $NGINX_CONF
+                  echo "        proxy_pass http://\$backend;" >> $NGINX_CONF
+                  echo "        proxy_set_header Host \$host;" >> $NGINX_CONF
+                  echo "        proxy_set_header X-Real-IP \$remote_addr;" >> $NGINX_CONF
+                  echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" >> $NGINX_CONF
+                  echo "        proxy_set_header X-Forwarded-Proto \$scheme;" >> $NGINX_CONF
+                  echo "    }" >> $NGINX_CONF
+              done
+
+              # Ruta raíz que sirve el index.html
+              echo "    location = / {" >> $NGINX_CONF
+              echo "        try_files /index.html =404;" >> $NGINX_CONF
+              echo "    }" >> $NGINX_CONF
+
+              echo "}" >> $NGINX_CONF
+
+              # Reiniciar NGINX para aplicar la nueva configuración
+              systemctl restart nginx
+              EOF
+  )
+
   root_block_device {
     volume_type           = "gp3"
     delete_on_termination = true
   }
-
 
   tags = merge(local.global_tags, {
     Name = "ec2-${var.environment}-${var.project_name}-instance"
@@ -185,6 +284,7 @@ resource "aws_instance" "nginx_proxy" {
   depends_on = [aws_key_pair.key_pair, module.services_discovery]
 
 }
+
 resource "aws_eip" "eip_nat" {
   domain = "vpc"
 
@@ -239,6 +339,7 @@ resource "aws_iam_policy" "nginx_lb_policy" {
   description = "Permite a la instancia NGINX consultar AWS Cloud Map"
   policy      = data.aws_iam_policy_document.nginx_lb_policy_doc.json
 }
+
 
 resource "aws_iam_role_policy_attachment" "nginx_lb_policy_attach" {
   role       = aws_iam_role.nginx_lb_role.name

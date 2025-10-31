@@ -42,16 +42,16 @@ variable "owner_name" {
   type        = string
 }
 
+variable "index_html" {
+  description = "HTML que servirá la ruta raíz (/) del proxy"
+  type        = string
+  default     = "<h1>Welcome</h1>"
+}
+
 variable "namespace_name" {
   description = "Nombre del namespace para Service Discovery"
   type        = string
-  default     = "internal-ecs"
-}
-
-variable "services" {
-  description = "Lista de servicios manejados por el Load Balancer"
-  type        = list(string)
-  default     = ["angular", "react", "api", "blog", "python-api"]
+  default     = "internal.local"
 }
 
 variable "nginx_instance_type" {
@@ -61,5 +61,6 @@ variable "nginx_instance_type" {
 }
 
 variable "ssh_allowed_cidr" {
-
+  description = "CIDR blocks allowed for SSH access"
+  type        = list(string)
 }
