@@ -45,7 +45,13 @@ variable "owner_name" {
 variable "namespace_name" {
   description = "Nombre del namespace para Service Discovery"
   type        = string
-  default     = "internal.ecs"
+  default     = "internal-ecs"
+}
+
+variable "services" {
+  description = "Lista de servicios manejados por el Load Balancer"
+  type        = list(string)
+  default     = ["angular", "react", "api", "blog", "python-api"]
 }
 
 variable "nginx_instance_type" {

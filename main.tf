@@ -5,6 +5,7 @@ locals {
     "OwnerName"   = var.owner_name
     "ProjectName" = var.project_name
   }
+
 }
 
 # Data sources
@@ -26,7 +27,6 @@ data "aws_ami" "amazon_linux_2" {
     values = ["hvm"]
   }
 }
-
 module "services_discovery" {
   source = "./modules/services_discovery/private"
 
@@ -34,7 +34,7 @@ module "services_discovery" {
   namespace_name = "internal.ecs"
   services = {
     # Backend APIs (privados)
-    nestjs-api = {
+    nestjs-backend = {
       name                           = "nestjs"
       dns_type                       = "A"
       ttl                            = 60
@@ -42,7 +42,7 @@ module "services_discovery" {
       health_check_failure_threshold = 2
     },
 
-    python-api = {
+    python-analytics = {
       name                           = "python"
       dns_type                       = "A"
       ttl                            = 60
@@ -50,12 +50,12 @@ module "services_discovery" {
       health_check_failure_threshold = 2
     },
 
-    postgresql = {
-      name                           = "postgresql"
-      dns_type                       = "SRV" # Para servicios con puerto específico
+    mariadb = {
+      name                           = "mariadb"
+      dns_type                       = "A" # Para servicios con puerto específico
       ttl                            = 300
       routing_policy                 = "MULTIVALUE"
-      health_check_failure_threshold = 3
+      health_check_failure_threshold = 1
     },
 
     # Frontends (accesibles via ALB, pero discovery interno)
@@ -164,16 +164,13 @@ resource "local_file" "private_key" {
 
 # EC2 Instance para NGINX
 resource "aws_instance" "nginx_proxy" {
-  ami           = data.aws_ami.amazon_linux_2.id
+  ami           = "ami-08813f55dd23cc99c" # data.aws_ami.amazon_linux_2.id
   instance_type = var.nginx_instance_type
   subnet_id     = var.public_subnet_ids[0]
 
   vpc_security_group_ids = [aws_security_group.nginx.id]
   key_name               = aws_key_pair.key_pair.key_name
-
-  user_data = base64encode(templatefile("${path.module}/templates/user-data.sh.tpl", {
-    namespace_name = var.namespace_name
-  }))
+  iam_instance_profile   = aws_iam_instance_profile.nginx_lb_profile.name
 
   root_block_device {
     volume_type           = "gp3"
@@ -185,7 +182,7 @@ resource "aws_instance" "nginx_proxy" {
     Name = "ec2-${var.environment}-${var.project_name}-instance"
   })
 
-  depends_on = [aws_key_pair.key_pair]
+  depends_on = [aws_key_pair.key_pair, module.services_discovery]
 
 }
 resource "aws_eip" "eip_nat" {
@@ -199,4 +196,59 @@ resource "aws_eip" "eip_nat" {
 resource "aws_eip_association" "nat_eip_assoc" {
   allocation_id        = aws_eip.eip_nat.id
   network_interface_id = aws_instance.nginx_proxy.primary_network_interface_id
+}
+
+resource "aws_iam_role" "nginx_lb_role" {
+  name        = "nginx-lb-role"
+  description = "Rol IAM para la instancia NGINX Load Balancer con permisos para AWS Cloud Map"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = merge(local.global_tags, {
+    Name = "iam-${var.environment}-${var.project_name}-nginx-lb-role"
+  })
+}
+
+# Permisos mínimos para descubrir servicios en Cloud Map
+data "aws_iam_policy_document" "nginx_lb_policy_doc" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "servicediscovery:ListServices",
+      "servicediscovery:GetService",
+      "servicediscovery:ListInstances",
+      "ec2:DescribeInstances", # opcional, para futuras extensiones
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "nginx_lb_policy" {
+  name        = "nginx-lb-cloudmap-policy"
+  description = "Permite a la instancia NGINX consultar AWS Cloud Map"
+  policy      = data.aws_iam_policy_document.nginx_lb_policy_doc.json
+}
+
+resource "aws_iam_role_policy_attachment" "nginx_lb_policy_attach" {
+  role       = aws_iam_role.nginx_lb_role.name
+  policy_arn = aws_iam_policy.nginx_lb_policy.arn
+}
+
+resource "aws_iam_instance_profile" "nginx_lb_profile" {
+  name = "iam-${var.environment}-${var.project_name}-nginx-lb-instance-profile"
+  role = aws_iam_role.nginx_lb_role.name
+  tags = merge(local.global_tags, {
+    Name = "iam-${var.environment}-${var.project_name}-nginx-lb-instance-profile"
+  })
 }

@@ -13,6 +13,21 @@ output "namespace_id" {
   value       = module.services_discovery.namespace_id
 }
 
+output "service_discovery_service_names" {
+  description = "Nombres de los servicios registrados en Service Discovery"
+  value       = module.services_discovery.service_names
+}
+
+output "service_discovery_service_ids" {
+  description = "IDs de los servicios registrados en Service Discovery"
+  value       = module.services_discovery.service_ids
+}
+
+output "service_discovery_service_arns" {
+  description = "ARNs of the service discovery services"
+  value       = module.services_discovery.service_arns
+}
+
 
 output "service_urls" {
   description = "URLs de acceso a los servicios via NGINX"
