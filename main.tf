@@ -6,7 +6,7 @@ locals {
     "ProjectName" = var.project_name
   }
 
-  sd_services = ["wordpress", "angular", "reactjs"]
+  sd_services = ["wordpress", "angular", "reactjs", "n8n", "nextjs"]
 }
 
 # Data sources
@@ -33,12 +33,43 @@ data "aws_ami" "amazon_linux_2" {
 data "aws_vpc" "selected" {
   id = var.vpc_id
 }
+data "cloudflare_ip_ranges" "cf" {}
 
 # Security Group para NGINX
 resource "aws_security_group" "nginx" {
   name        = "${var.project_name}-nginx-sg"
   description = "Security group for NGINX reverse proxy"
   vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = data.cloudflare_ip_ranges.cf.ipv4_cidrs
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = data.cloudflare_ip_ranges.cf.ipv4_cidrs
+  }
+
+  # # HTTP from SSH IPs (for testing/direct access)
+  # ingress {
+  #   from_port   = 80
+  #   to_port     = 80
+  #   protocol    = "tcp"
+  #   cidr_blocks = var.ssh_allowed_cidr
+  # }
+  # 
+  # # HTTPS from SSH IPs (for testing/direct access)
+  # ingress {
+  #   from_port   = 443
+  #   to_port     = 443
+  #   protocol    = "tcp"
+  #   cidr_blocks = var.ssh_allowed_cidr
+  # }
 
   # SSH access desde tu IP (opcional para administración)
   ingress {
@@ -55,6 +86,8 @@ resource "aws_security_group" "nginx" {
     protocol    = "icmp"
     cidr_blocks = var.ssh_allowed_cidr
   }
+
+
 
   # Egress - permitir todo el tráfico saliente
   egress {
@@ -97,23 +130,18 @@ resource "aws_instance" "nginx_proxy" {
   instance_type = var.nginx_instance_type
   subnet_id     = var.public_subnet_ids[0]
 
-  vpc_security_group_ids      = [aws_security_group.nginx.id, "sg-044171602756a62f2"]
+  vpc_security_group_ids      = [aws_security_group.nginx.id]
   key_name                    = aws_key_pair.key_pair.key_name
   iam_instance_profile        = aws_iam_instance_profile.nginx_lb_profile.name
   user_data_replace_on_change = true
-  user_data = replace(
-    replace(
-      replace(
-        file("${path.module}/templates/user-data-nginx.sh"),
-        "__NAMESPACE__",
-        "container-edge-${var.environment}.local"
-      ),
-      "__SERVICES__",
-      join(" ", local.sd_services)
-    ),
-    "__RESOLVER__",
-    cidrhost(data.aws_vpc.selected.cidr_block, 2)
-  )
+  user_data = templatefile("${path.module}/templates/user-data-nginx.sh", {
+    environment = var.environment
+    domain_name = var.domain_name
+    namespace   = "container-edge-${var.environment}.local"
+    services    = join(" ", local.sd_services)
+    resolver    = cidrhost(data.aws_vpc.selected.cidr_block, 2)
+  })
+
 
   root_block_device {
     volume_type           = "gp3"
@@ -140,8 +168,10 @@ resource "aws_eip" "eip_nat" {
 }
 
 resource "aws_eip_association" "nat_eip_assoc" {
-  allocation_id        = aws_eip.eip_nat.id
-  network_interface_id = aws_instance.nginx_proxy.primary_network_interface_id
+  instance_id   = aws_instance.nginx_proxy.id
+  allocation_id = aws_eip.eip_nat.id
+  # allocation_id        = aws_eip.eip_nat.id
+  # network_interface_id = aws_instance.nginx_proxy.primary_network_interface_id
 }
 
 resource "aws_iam_role" "nginx_lb_role" {

@@ -44,5 +44,17 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2" #2.5.3
     }
+    cloudinit = {
+      source  = "hashicorp/cloudinit"
+      version = "~> 2" #2.3.7   
+    }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5"
+    }
   }
+}
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }

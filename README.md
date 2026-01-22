@@ -31,7 +31,7 @@ sudo tail -n 200 /var/log/nginx/access.log
 sudo ss -tulpn | grep nginx || sudo ss -tulpn
 ```
 
-## Si la instancia cambia ejectuar
+## Si la instancia cambia ejecutar
 ```bash
 ssh-keygen -R ec2-34-235-186-62.compute-1.amazonaws.com
 ```

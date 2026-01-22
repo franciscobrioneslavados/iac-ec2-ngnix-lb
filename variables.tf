@@ -48,7 +48,26 @@ variable "nginx_instance_type" {
   default     = "t2.micro"
 }
 
+variable "nat_gateway_sg_id" {
+  description = "ID of the NAT gateway security group"
+}
+
 variable "ssh_allowed_cidr" {
   description = "CIDR blocks allowed for SSH access"
   type        = list(string)
+}
+
+variable "domain_name" {
+  description = "Domain name for the reverse proxy"
+  type        = string
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token"
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_zone_id" {
+  type = string
 }
