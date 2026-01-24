@@ -71,3 +71,11 @@ variable "cloudflare_api_token" {
 variable "cloudflare_zone_id" {
   type = string
 }
+
+variable "services" {
+  description = "Servicios expuestos por el edge proxy"
+  type        = map(string)
+  default = {
+    default = "80"
+  }
+}

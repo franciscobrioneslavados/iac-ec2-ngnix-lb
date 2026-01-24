@@ -10,7 +10,7 @@ output "nginx_instance_id" {
 
 output "ssh_connection" {
   description = "Comando para conectarse via SSH"
-  value       = "ssh -i '${aws_key_pair.key_pair.key_name}.pem' ec2-user@${aws_eip.eip_nat.public_dns}"
+  value       = "ssh -i '${aws_key_pair.key_pair.key_name}.pem' ubuntu@${aws_eip.eip_nat.public_dns}"
 }
 
 output "nginx_security_group_id" {

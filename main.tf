@@ -5,8 +5,11 @@ locals {
     "OwnerName"   = var.owner_name
     "ProjectName" = var.project_name
   }
-
-  sd_services = ["wordpress", "angular", "reactjs", "n8n", "nextjs"]
+  services_json = jsonencode(var.services)
+  #example {
+  #  wordpress: "8080"
+  #  n8n: "5678"
+  #}
 }
 
 # Data sources
@@ -14,13 +17,13 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-data "aws_ami" "amazon_linux_2" {
+data "aws_ami" "ubuntu_22_04" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-ebs"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 
   filter {
@@ -45,31 +48,15 @@ resource "aws_security_group" "nginx" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = data.cloudflare_ip_ranges.cf.ipv4_cidrs
+    cidr_blocks = concat(data.cloudflare_ip_ranges.cf.ipv4_cidrs, ["0.0.0.0/0"])
   }
 
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = data.cloudflare_ip_ranges.cf.ipv4_cidrs
+    cidr_blocks = concat(data.cloudflare_ip_ranges.cf.ipv4_cidrs, ["0.0.0.0/0"])
   }
-
-  # # HTTP from SSH IPs (for testing/direct access)
-  # ingress {
-  #   from_port   = 80
-  #   to_port     = 80
-  #   protocol    = "tcp"
-  #   cidr_blocks = var.ssh_allowed_cidr
-  # }
-  # 
-  # # HTTPS from SSH IPs (for testing/direct access)
-  # ingress {
-  #   from_port   = 443
-  #   to_port     = 443
-  #   protocol    = "tcp"
-  #   cidr_blocks = var.ssh_allowed_cidr
-  # }
 
   # SSH access desde tu IP (opcional para administración)
   ingress {
@@ -126,7 +113,7 @@ resource "local_file" "private_key" {
 
 # EC2 Instance para NGINX
 resource "aws_instance" "nginx_proxy" {
-  ami           = data.aws_ami.amazon_linux_2.id
+  ami           = data.aws_ami.ubuntu_22_04.id
   instance_type = var.nginx_instance_type
   subnet_id     = var.public_subnet_ids[0]
 
@@ -134,12 +121,15 @@ resource "aws_instance" "nginx_proxy" {
   key_name                    = aws_key_pair.key_pair.key_name
   iam_instance_profile        = aws_iam_instance_profile.nginx_lb_profile.name
   user_data_replace_on_change = true
-  user_data = templatefile("${path.module}/templates/user-data-nginx.sh", {
-    environment = var.environment
-    domain_name = var.domain_name
-    namespace   = "container-edge-${var.environment}.local"
-    services    = join(" ", local.sd_services)
-    resolver    = cidrhost(data.aws_vpc.selected.cidr_block, 2)
+
+
+  user_data = templatefile("${path.module}/templates/user-data-ubuntu_v2.sh", {
+    environment          = var.environment
+    domain_name          = var.domain_name
+    namespace            = "container-edge-${var.environment}.local"
+    resolver             = cidrhost(data.aws_vpc.selected.cidr_block, 2)
+    cloudflare_api_token = var.cloudflare_api_token
+    services_json        = local.services_json
   })
 
 
@@ -204,6 +194,8 @@ data "aws_iam_policy_document" "nginx_lb_policy_doc" {
       "servicediscovery:GetService",
       "servicediscovery:ListInstances",
       "ec2:DescribeInstances", # opcional, para futuras extensiones
+      "ec2:CreateTags",        # para etiquetado automático
+      "ec2:DescribeTags",      # para ver etiquetas
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents"
@@ -217,7 +209,6 @@ resource "aws_iam_policy" "nginx_lb_policy" {
   description = "Permite a la instancia NGINX consultar AWS Cloud Map"
   policy      = data.aws_iam_policy_document.nginx_lb_policy_doc.json
 }
-
 
 resource "aws_iam_role_policy_attachment" "nginx_lb_policy_attach" {
   role       = aws_iam_role.nginx_lb_role.name

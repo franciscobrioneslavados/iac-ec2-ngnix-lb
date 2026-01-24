@@ -22,6 +22,18 @@ resource "cloudflare_dns_record" "root" {
   proxied = false
 }
 
+# Record for www 
+resource "cloudflare_dns_record" "www" {
+  zone_id = var.cloudflare_zone_id
+  ttl     = 1
+  name    = "www"
+  type    = "A"
+  content = aws_eip.eip_nat.public_ip
+  comment = "Record para el proxy"
+  proxied = false
+}
+
+
 # # Force HTTPS
 # # permiso para redirigir HTTP a HTTPS 
 # # permiso en cloudflare api token like: Zone: Zone Settings: Edit
